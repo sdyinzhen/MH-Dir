@@ -3,5 +3,8 @@
  
  To run this repo, please follow the example case in Jupyter Notebook [MH-Dir_Example_v2021704.ipynb](https://github.com/sdyinzhen/MH-Dir/blob/main/MH-Dir_v2021704.ipynb)
  
+# Figure illustration of the MH-Dir
+<img src="src/workflow.jpg" width="600" height="570">
+
 # Licensing
 This repository is released under the MIT License.
