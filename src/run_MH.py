@@ -176,7 +176,7 @@ def dir_mh_sampling(MC_c_prop, MC_seis, ini_alpha, seis_obs, maxstep = 1000, del
             Beta_reject = False
             t=t+1
 
-            print('Progress -> {:1.1%}'.format(t/maxstep), end='\r')
+            #print('Progress -> {:1.1%}'.format(t/maxstep), end='\r')
             itr=0
             reject_n = 0
         else:
