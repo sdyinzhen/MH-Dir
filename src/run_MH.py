@@ -30,20 +30,27 @@ def run_MH(MC_Prptn, MC_Seis, Ini_alpha, Seis_obs, Maxstep=25000, delta_left=0.2
     '''
     
     post_smpl_all = []
+    print('Program is Running & Calculating Cost Time... Please Be Patient :)', end='\r')
+    start_t_total =  time.time()
     for i in range(len(Seis_obs)):
-        start_t = time.time()
-        print('Progress -> {:1.1%}'.format((i+1)/Seis_obs.shape[0]), end='\r')
-
         # Run MH
-        post_smpl = dir_mh_sampling(MC_Prptn, MC_Seis, Ini_alpha, [Seis_obs[i]], \
-                                    maxstep=Maxstep, delta_left=delta_left, delta_right=delta_right)
-
-        post_smpl_all.append(post_smpl[0][:,0,:])
+        runflag = True
+        while runflag:
+            start_t = time.time()
+            [post_smpl, post_beta, runflag] = dir_mh_sampling(MC_Prptn, MC_Seis, Ini_alpha, Seis_obs[i:i+1], \
+                                                              maxstep=Maxstep, \
+                                                              delta_left=delta_left, delta_right=delta_right)
+        post_smpl_all.append(post_smpl[:,0,:])
 
         end_t = time.time()
-        if i == 0:
-            est_run_time = (end_t - start_t)*Seis_obs.shape[0]/60
-            print ('Estimated Running Time:{:.2f}'.format(est_run_time)+' minutes')
+        est_run_time = (end_t - start_t)*(Seis_obs.shape[0]-i-1)/60
+        progress = (i+1)/Seis_obs.shape[0]
+        
+        print(' Running in Progress -> {:1.1%}. '.format(progress) + 
+              'Estimated Remaining Time:{:.2f}'.format(est_run_time)+' Minutes', end='\r')
+    
+    post_smpl_all = np.asarray(post_smpl_all)
+    print(' \n Finished! Total Cost Time: {:.2f}'.format((time.time()-start_t_total)/60) +' Minutes')
     return post_smpl_all
 
 
@@ -73,98 +80,84 @@ def dir_mh_sampling(MC_c_prop, MC_seis, ini_alpha, seis_obs, maxstep = 1000, del
     '''
     
     c_dim = MC_c_prop.shape[1]
-    MC_c_seis = np.c_[MC_c_prop[:,:c_dim-1], MC_seis]
-    
+    seis_dim = MC_seis.shape[1]
     # KDE of the joint distribution between Monte Carlo samples of seismic ('seis') and facies proportion ('c')
-    endog_dim = 'c'*1
+    ## calculate f(y|x) or here f(seis|c); 
+    # dependendt var, endog: y, here is seismic; 
+    # independent var, exog x, here is proportion c.
+    dep_dim = 'c'*seis_dim
     indep_dim = 'c'*(c_dim-1)
-    kde_seis_c = sm.nonparametric.KDEMultivariateConditional(endog=MC_c_seis[:,:c_dim-1], \
-                                                             exog=MC_c_seis[:,c_dim-1:], \
-                                                             dep_type=indep_dim, indep_type=endog_dim, bw='normal_reference')
+    # KDE of the joint distribution between Monte Carlo samples f(seis, c)
+    kde_seis_c = sm.nonparametric.KDEMultivariateConditional(endog=MC_seis, \
+                                                             exog=MC_c_prop[:,:c_dim-1], \
+                                                             dep_type=dep_dim, indep_type=indep_dim, 
+                                                             bw='normal_reference')
     
     '''Initial state''' 
-    beta = np.copy(ini_alpha)
-    c_pos = np.random.dirichlet(beta, 1)
+    c_pos = np.random.dirichlet(ini_alpha, 1)
+    
     c_pos_all = []
     c_pos_all.append(c_pos)
-    
     beta_all = []
-    beta_all.append(beta)
+    beta_all.append(ini_alpha)
     
     '''calculate pdf of initial c_pos and the proposed c_star'''
     
-    p_seis_cpos = kde_seis_c.pdf(endog_predict=c_pos[0, :c_dim-1], exog_predict=seis_obs)
+    p_seis_cpos = kde_seis_c.pdf(endog_predict=seis_obs, exog_predict=c_pos[0, :c_dim-1])
 
-    dir_cpos = stats.dirichlet.pdf(c_pos[0,:], beta)
+    dir_cpos = stats.dirichlet.pdf(c_pos[0,:], ini_alpha)
     
     dir_AlphaHat_cpos = stats.dirichlet.pdf(c_pos[0,:], ini_alpha)
     
     '''determine delta '''
-#     delta = jumpwidth * ini_alpha
-    
     '''define the proposed uniform distribution f(beta)'s lower and upper bound'''
-    Jalpha_max = ini_alpha*(1+delta_right)
-        
-    Jalpha_min = ini_alpha*(1-delta_left)
+    Jalpha_max = ini_alpha + delta_right
+    Jalpha_min = ini_alpha - delta_left
     
     '''ensure each element of alpha >0'''
     Jalpha_min[Jalpha_min<=0] = 0.1 
     
-    itr=0
+    beta = np.random.uniform(Jalpha_min, Jalpha_max)
     
-    t=1
-    Beta_reject = True
-
-    reject_n = 0
+    # locally perturb the beta 
+    jumpwidth = 0.025
+    delta = jumpwidth * ini_alpha.mean()
     
+    t = 1 
+    itr = 0
     while t<maxstep:
-#     for i in range(maxstep):
+            
+        # locally perturb the beta 
+        Jalpha_max_local = beta + delta
+        Jalpha_min_local = beta -delta
         
+        Jalpha_min_local[Jalpha_min_local<=Jalpha_min] = Jalpha_min[Jalpha_min_local<=Jalpha_min]
+        Jalpha_max_local[Jalpha_max_local>=Jalpha_max] = Jalpha_max[Jalpha_max_local>=Jalpha_max]
+        
+        beta = np.random.uniform(Jalpha_min_local, Jalpha_max_local)
+        # sample c_star and calculate the probablity
         try:
-#             '''sample from proposed posterior'''
-#         if Beta_reject:
-            if reject_n > 4:
-                if itr>60 :
-                    pre_beta = np.copy(np.asarray(beta_all))
-    #                 beta = np.mean(pre_beta,axis=0)
-                    beta = np.random.uniform(Jalpha_min, Jalpha_max, 4)
-    #                 beta = np.copy(beta_all[-1])
-                    itr=0
-                for i in range(len(beta)):
-                    '''seach best beta gradually'''
-                    beta[i] = np.random.uniform(0.97*beta[i], 1.03*beta[i])
-                    if beta[i]<Jalpha_min[i]:
-                        beta[i]=Jalpha_min[i]
-                    elif beta[i]>Jalpha_max[i]:
-                        beta[i]=Jalpha_max[i]
-                        
-                        
-#             else: 
-#                 beta = np.random.uniform(Jalpha_min, Jalpha_max, 4)  
             c_star = np.random.dirichlet(beta, 1)
             dir_cstar = stats.dirichlet.pdf(c_star[0,:], beta)
             dir_AlphaHat_p_star =  stats.dirichlet.pdf(c_star[0,:], ini_alpha)
-
-        
         except:
-            next
             
+            next
         '''calculate p(seis|c)'''
 
-        p_seis_cstar = kde_seis_c.pdf(endog_predict=c_star[0, :c_dim-1], exog_predict=seis_obs)
+        p_seis_cstar = kde_seis_c.pdf(endog_predict=seis_obs, exog_predict=c_star[0, :c_dim-1])
 
         
         '''calculate acceptance ratio'''
-
+   
         r = (p_seis_cstar*dir_AlphaHat_p_star*dir_cstar)/(p_seis_cpos*dir_AlphaHat_cpos*dir_cpos)
-
+        
+#         r = (p_seis_cstar*dir_cstar)/(p_seis_cpos*dir_cpos)
+        
         u = np.random.uniform(0, 1, 1)
 
-        '''Obstain posterior sample'''
-        
-
+        '''Obtain posterior sample'''
         if r>u: # accept
-        
             c_pos = c_star
             c_pos_all.append(c_pos)
             
@@ -173,19 +166,20 @@ def dir_mh_sampling(MC_c_prop, MC_seis, ini_alpha, seis_obs, maxstep = 1000, del
             p_seis_cpos = p_seis_cstar
             beta_all.append(np.copy(beta))
             
-            Beta_reject = False
             t=t+1
-
-            #print('Progress -> {:1.1%}'.format(t/maxstep), end='\r')
-            itr=0
-            reject_n = 0
+            itr = 0
+#             print('Progress -> {:1.1%}'.format(t/maxstep), end='\r')
         else:
-            Beta_reject = True
-            itr = itr + 1
-            reject_n = reject_n + 1
-                
+            itr = itr+1        
+            # stop the run if rejected 10000 times per acceptation 
+            if itr>10000:
+                c_pos_all = np.asarray(c_pos_all)
+                beta_all = np.asarray(beta_all)
+
+                return c_pos_all, beta_all, True
+
            
     c_pos_all = np.asarray(c_pos_all)
     beta_all = np.asarray(beta_all)
     
-    return c_pos_all, beta_all
+    return c_pos_all, beta_all, False
