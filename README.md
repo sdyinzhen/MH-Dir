@@ -8,5 +8,8 @@
 **Figure: illustration of the MH-Dir** </p>
 <img src="src/workflow.jpg" width="600" height="570">
 
+**NB** </p>
+The input data have to be removed from public domain due to confidentiality issues. We will replace it by new synthetic dataset. However, the source codes are still publiclly available. 
+
 # Licensing
 This repository is released under the MIT License.
